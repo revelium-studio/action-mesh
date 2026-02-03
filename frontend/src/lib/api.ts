@@ -1,11 +1,8 @@
 /**
  * ActionMesh API Client
  *
- * Handles communication with the ActionMesh worker API.
+ * Handles communication with the API routes that proxy to RunPod Serverless.
  */
-
-// Worker URL from environment variable
-const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || 'http://localhost:8000';
 
 export type ProcessingMode = 'default' | 'fast' | 'fast_low_ram';
 export type JobStatusType = 'queued' | 'running' | 'finished' | 'error';
@@ -23,11 +20,6 @@ export interface JobResponse {
   outputs?: JobOutputs | null;
 }
 
-export interface HealthResponse {
-  status: string;
-  gpu_available: boolean;
-}
-
 /**
  * API Error class for handling HTTP errors
  */
@@ -43,24 +35,7 @@ export class ApiError extends Error {
 }
 
 /**
- * Check if the worker is healthy and GPU is available
- */
-export async function checkHealth(): Promise<HealthResponse> {
-  const response = await fetch(`${WORKER_URL}/health`);
-
-  if (!response.ok) {
-    throw new ApiError(
-      'Health check failed',
-      response.status,
-      await response.text()
-    );
-  }
-
-  return response.json();
-}
-
-/**
- * Create a new processing job
+ * Create a new processing job via RunPod Serverless
  *
  * @param file - Video file to upload
  * @param mode - Processing mode (default, fast, fast_low_ram)
@@ -77,17 +52,17 @@ export async function createJob(
   formData.append('mode', mode);
   formData.append('blender_export', blenderExport.toString());
 
-  const response = await fetch(`${WORKER_URL}/jobs`, {
+  const response = await fetch('/api/jobs', {
     method: 'POST',
     body: formData,
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
     throw new ApiError(
-      errorData.detail || 'Failed to create job',
+      errorData.error || 'Failed to create job',
       response.status,
-      errorData.detail
+      errorData.error
     );
   }
 
@@ -95,22 +70,23 @@ export async function createJob(
 }
 
 /**
- * Get job status and outputs
+ * Get job status from RunPod Serverless
  *
  * @param jobId - Job ID to check
  * @returns Job response with status and outputs
  */
 export async function getJobStatus(jobId: string): Promise<JobResponse> {
-  const response = await fetch(`${WORKER_URL}/jobs/${jobId}`);
+  const response = await fetch(`/api/jobs/${jobId}`);
 
   if (!response.ok) {
     if (response.status === 404) {
       throw new ApiError('Job not found', 404);
     }
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
     throw new ApiError(
-      'Failed to get job status',
+      errorData.error || 'Failed to get job status',
       response.status,
-      await response.text()
+      errorData.error
     );
   }
 
@@ -119,24 +95,29 @@ export async function getJobStatus(jobId: string): Promise<JobResponse> {
 
 /**
  * Get the full URL for downloading an output file
+ * For RunPod Serverless, outputs are typically returned as URLs or base64
  *
- * @param path - Relative path from job outputs
+ * @param path - URL or path from job outputs
  * @returns Full URL for downloading
  */
 export function getOutputUrl(path: string): string {
-  // Remove leading slash if present
-  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-  return `${WORKER_URL}/${cleanPath}`;
+  // If it's already a full URL, return it
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  // Otherwise, it might be a relative path or base64
+  return path;
 }
 
 /**
  * Get the URL for downloading the meshes archive
  *
  * @param jobId - Job ID
- * @returns Full URL for downloading meshes.zip
+ * @returns Full URL for downloading meshes.zip (from RunPod output)
  */
 export function getMeshesArchiveUrl(jobId: string): string {
-  return `${WORKER_URL}/outputs/${jobId}/meshes.zip`;
+  // This will be set from the job outputs
+  return `/api/jobs/${jobId}/meshes`;
 }
 
 /**
@@ -176,25 +157,6 @@ export async function pollJobStatus(
 }
 
 /**
- * Delete a job and its files
- *
- * @param jobId - Job ID to delete
- */
-export async function deleteJob(jobId: string): Promise<void> {
-  const response = await fetch(`${WORKER_URL}/jobs/${jobId}`, {
-    method: 'DELETE',
-  });
-
-  if (!response.ok && response.status !== 404) {
-    throw new ApiError(
-      'Failed to delete job',
-      response.status,
-      await response.text()
-    );
-  }
-}
-
-/**
  * Validate video file before upload
  *
  * @param file - File to validate
@@ -213,8 +175,8 @@ export function validateVideoFile(file: File): {
     };
   }
 
-  // Check file size (100MB max)
-  const maxSize = 100 * 1024 * 1024;
+  // Check file size (50MB max for serverless)
+  const maxSize = 50 * 1024 * 1024;
   if (file.size > maxSize) {
     return {
       valid: false,
