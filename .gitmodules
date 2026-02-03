@@ -1,0 +1,3 @@
+[submodule "worker/actionmesh_repo"]
+	path = worker/actionmesh_repo
+	url = https://github.com/facebookresearch/actionmesh.git

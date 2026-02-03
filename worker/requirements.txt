@@ -1,0 +1,29 @@
+# ActionMesh Worker API Dependencies
+# Python 3.10+ required
+
+# Web framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# HTTP client for downloading videos from URLs
+httpx>=0.26.0
+
+# Data validation
+pydantic>=2.5.0
+
+# ActionMesh dependencies are installed separately from the actionmesh_repo
+# See: actionmesh_repo/requirements.txt
+# Key dependencies include:
+# - torch>=2.4.0 (with CUDA 12.1)
+# - torchvision>=0.19.0
+# - diffusers
+# - transformers
+# - huggingface_hub
+
+# Optional: PyTorch3D for video rendering
+# Install separately following: https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md
+# pytorch3d
+
+# System requirement: ffmpeg must be installed for video processing
+# Install via: apt-get install ffmpeg (Ubuntu) or brew install ffmpeg (macOS)

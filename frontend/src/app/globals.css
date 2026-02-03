@@ -1,0 +1,201 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0a0e14;
+  --foreground: #e6e1cf;
+  --primary: #14b892;
+  --primary-hover: #0d9476;
+  --surface: #131920;
+  --surface-hover: #1a2129;
+  --border: #232a35;
+  --muted: #5c6773;
+  --accent: #ffb454;
+  --danger: #f07178;
+  --success: #c2d94c;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Mesh grid background */
+.mesh-bg {
+  background-image: 
+    linear-gradient(to right, rgba(35, 42, 53, 0.3) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(35, 42, 53, 0.3) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Gradient glow effect */
+.glow-primary {
+  box-shadow: 0 0 40px rgba(20, 184, 146, 0.15);
+}
+
+.glow-accent {
+  box-shadow: 0 0 30px rgba(255, 180, 84, 0.1);
+}
+
+/* Upload dropzone styles */
+.dropzone {
+  @apply relative border-2 border-dashed border-[var(--border)] rounded-2xl p-12 text-center;
+  @apply transition-all duration-300 ease-out;
+  @apply hover:border-[var(--primary)] hover:bg-[var(--surface)];
+}
+
+.dropzone.dragging {
+  @apply border-[var(--primary)] bg-[var(--surface)] scale-[1.02];
+  box-shadow: 0 0 60px rgba(20, 184, 146, 0.2);
+}
+
+/* Button styles */
+.btn-primary {
+  @apply px-6 py-3 bg-[var(--primary)] text-[var(--background)] font-semibold rounded-xl;
+  @apply transition-all duration-200 ease-out;
+  @apply hover:bg-[var(--primary-hover)] hover:scale-[1.02];
+  @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+}
+
+.btn-secondary {
+  @apply px-6 py-3 bg-[var(--surface)] text-[var(--foreground)] font-medium rounded-xl;
+  @apply border border-[var(--border)];
+  @apply transition-all duration-200 ease-out;
+  @apply hover:bg-[var(--surface-hover)] hover:border-[var(--muted)];
+}
+
+/* Card styles */
+.card {
+  @apply bg-[var(--surface)] rounded-2xl border border-[var(--border)];
+  @apply transition-all duration-300;
+}
+
+.card:hover {
+  @apply border-[var(--muted)];
+}
+
+/* Status indicator animation */
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* Progress bar animation */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.progress-indeterminate {
+  animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
+
+/* Floating mesh animation */
+@keyframes mesh-float {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-5px) rotate(1deg);
+  }
+  75% {
+    transform: translateY(5px) rotate(-1deg);
+  }
+}
+
+.mesh-float {
+  animation: mesh-float 6s ease-in-out infinite;
+}
+
+/* Mode selector styles */
+.mode-option {
+  @apply p-4 rounded-xl border-2 border-[var(--border)] cursor-pointer;
+  @apply transition-all duration-200;
+}
+
+.mode-option:hover {
+  @apply border-[var(--muted)] bg-[var(--surface)];
+}
+
+.mode-option.selected {
+  @apply border-[var(--primary)] bg-[var(--surface)];
+  box-shadow: 0 0 20px rgba(20, 184, 146, 0.1);
+}
+
+/* Download button styles */
+.download-btn {
+  @apply flex items-center gap-3 p-4 rounded-xl;
+  @apply bg-[var(--surface)] border border-[var(--border)];
+  @apply transition-all duration-200;
+}
+
+.download-btn:hover {
+  @apply bg-[var(--surface-hover)] border-[var(--primary)];
+  @apply translate-y-[-2px];
+  box-shadow: 0 4px 20px rgba(20, 184, 146, 0.15);
+}
+
+/* File type badge */
+.file-badge {
+  @apply px-2 py-1 text-xs font-mono rounded-md;
+  @apply bg-[var(--background)] text-[var(--muted)];
+}
+
+/* Error state */
+.error-box {
+  @apply p-4 rounded-xl;
+  @apply bg-[#f071781a] border border-[var(--danger)];
+}
+
+/* Success state */
+.success-box {
+  @apply p-4 rounded-xl;
+  @apply bg-[#c2d94c1a] border border-[var(--success)];
+}
