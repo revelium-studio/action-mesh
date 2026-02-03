@@ -1,44 +1,24 @@
-# ActionMesh RunPod Serverless Dockerfile
-#
-# Build and push this image to Docker Hub, then use it in RunPod Serverless.
-#
-# Build: docker build -f Dockerfile.serverless -t yourusername/actionmesh-serverless:latest .
-# Push:  docker push yourusername/actionmesh-serverless:latest
+# ActionMesh RunPod Serverless - Lightweight Version
+# Uses RunPod's pre-built PyTorch image
+# ActionMesh installs on first cold start (cached in network volume)
 
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.1.1-devel-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-
-# Install system dependencies
+# Install minimal system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     git \
     git-lfs \
-    ffmpeg \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    wget \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /
-
-# Clone and install ActionMesh
-RUN git clone https://github.com/facebookresearch/actionmesh.git /actionmesh \
-    && cd /actionmesh \
-    && git submodule update --init --recursive \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir -e .
-
-# Install RunPod SDK
+# Install runpod SDK
 RUN pip install --no-cache-dir runpod
 
 # Copy handler
 COPY handler.py /handler.py
 
-# Set HuggingFace cache
-ENV HF_HOME=/runpod-volume/cache/huggingface
-ENV TRANSFORMERS_CACHE=/runpod-volume/cache/huggingface
+# Set cache directories to use network volume
+ENV HF_HOME=/runpod-volume/cache
+ENV TRANSFORMERS_CACHE=/runpod-volume/cache
 
-# RunPod handler entry point
 CMD ["python", "-u", "/handler.py"]
