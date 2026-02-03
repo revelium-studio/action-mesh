@@ -1,8 +1,8 @@
 """
 RunPod Serverless Handler for ActionMesh
 
-This handler receives video data, processes it with ActionMesh, and returns the results.
-Deploy this to RunPod Serverless for auto-scaling GPU inference.
+Uses RunPod's PyTorch template and installs ActionMesh on first cold start.
+Models are cached in /runpod-volume for faster subsequent runs.
 """
 
 import os
@@ -11,14 +11,69 @@ import base64
 import tempfile
 import shutil
 import subprocess
+import json
 from pathlib import Path
 
 import runpod
 
-# Add ActionMesh to path
-ACTIONMESH_PATH = "/actionmesh"
-if os.path.exists(ACTIONMESH_PATH):
+# Paths
+ACTIONMESH_PATH = "/runpod-volume/actionmesh"
+CACHE_PATH = "/runpod-volume/cache"
+INSTALL_FLAG = "/runpod-volume/.actionmesh_installed"
+
+
+def install_actionmesh():
+    """Install ActionMesh on first cold start."""
+    if os.path.exists(INSTALL_FLAG):
+        print("ActionMesh already installed, skipping...")
+        # Just add to path
+        if ACTIONMESH_PATH not in sys.path:
+            sys.path.insert(0, ACTIONMESH_PATH)
+        return True
+    
+    print("Installing ActionMesh (first cold start)...")
+    
+    # Install ffmpeg
+    subprocess.run(["apt-get", "update"], capture_output=True)
+    subprocess.run(["apt-get", "install", "-y", "ffmpeg", "git", "git-lfs"], capture_output=True)
+    
+    # Clone ActionMesh
+    os.makedirs(ACTIONMESH_PATH, exist_ok=True)
+    
+    if not os.path.exists(os.path.join(ACTIONMESH_PATH, "inference")):
+        subprocess.run([
+            "git", "clone", "--depth", "1",
+            "https://github.com/facebookresearch/actionmesh.git",
+            ACTIONMESH_PATH
+        ], check=True)
+        
+        # Init submodules
+        subprocess.run([
+            "git", "-C", ACTIONMESH_PATH,
+            "submodule", "update", "--init", "--recursive"
+        ], check=True)
+    
+    # Install dependencies
+    req_file = os.path.join(ACTIONMESH_PATH, "requirements.txt")
+    subprocess.run([
+        sys.executable, "-m", "pip", "install", "-q",
+        "-r", req_file
+    ], check=True)
+    
+    # Install ActionMesh package
+    subprocess.run([
+        sys.executable, "-m", "pip", "install", "-q",
+        "-e", ACTIONMESH_PATH
+    ], check=True)
+    
+    # Add to path
     sys.path.insert(0, ACTIONMESH_PATH)
+    
+    # Create flag file
+    Path(INSTALL_FLAG).touch()
+    
+    print("ActionMesh installation complete!")
+    return True
 
 
 def extract_frames(video_path: str, output_dir: str, max_frames: int = 31) -> int:
@@ -32,7 +87,9 @@ def extract_frames(video_path: str, output_dir: str, max_frames: int = 31) -> in
         output_pattern
     ]
     
-    subprocess.run(cmd, capture_output=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {result.stderr}")
     
     frame_count = len(list(Path(output_dir).glob("*.png")))
     return frame_count
@@ -55,25 +112,25 @@ def run_actionmesh(input_dir: str, output_dir: str, fast: bool = True, low_ram: 
     
     env = os.environ.copy()
     env["PYTHONPATH"] = ACTIONMESH_PATH
+    env["HF_HOME"] = CACHE_PATH
+    env["TRANSFORMERS_CACHE"] = CACHE_PATH
     
+    print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     
+    print(f"STDOUT: {result.stdout}")
     if result.returncode != 0:
+        print(f"STDERR: {result.stderr}")
         raise RuntimeError(f"ActionMesh failed: {result.stderr}")
     
     return result.stdout
 
 
-def upload_to_storage(file_path: str) -> str:
-    """
-    Upload file and return URL.
-    For now, returns base64-encoded data.
-    In production, upload to S3/GCS and return URL.
-    """
+def file_to_base64_url(file_path: str) -> str:
+    """Convert file to base64 data URL."""
     with open(file_path, "rb") as f:
         data = base64.b64encode(f.read()).decode("utf-8")
     
-    # Determine mime type
     ext = Path(file_path).suffix.lower()
     mime_types = {
         ".glb": "model/gltf-binary",
@@ -87,91 +144,105 @@ def upload_to_storage(file_path: str) -> str:
 
 def handler(job):
     """
-    RunPod Serverless handler function.
+    RunPod Serverless handler.
     
     Input:
-        job["input"] = {
-            "video_base64": str,  # Base64-encoded video
-            "filename": str,      # Original filename
-            "mode": str,          # "default", "fast", or "fast_low_ram"
-            "blender_export": bool
+        {
+            "video_base64": str,      # Base64-encoded video
+            "filename": str,          # Original filename  
+            "mode": str,              # "default", "fast", or "fast_low_ram"
+            "blender_export": bool    # Export animated mesh (requires Blender)
         }
     
     Output:
         {
-            "per_frame_meshes": [url, ...],
-            "animated_mesh": url or null,
-            "preview_video": url or null
+            "per_frame_meshes": [base64_url, ...],
+            "animated_mesh": base64_url or null,
+            "preview_video": base64_url or null
         }
     """
-    job_input = job["input"]
-    
-    # Get input parameters
-    video_base64 = job_input.get("video_base64")
-    filename = job_input.get("filename", "video.mp4")
-    mode = job_input.get("mode", "fast_low_ram")
-    blender_export = job_input.get("blender_export", False)
-    
-    if not video_base64:
-        return {"error": "No video_base64 provided"}
-    
-    # Determine processing flags
-    fast = mode in ["fast", "fast_low_ram"]
-    low_ram = mode == "fast_low_ram"
-    
-    # Create temp directories
-    work_dir = tempfile.mkdtemp(prefix="actionmesh_")
-    input_dir = os.path.join(work_dir, "input")
-    output_dir = os.path.join(work_dir, "output")
-    os.makedirs(input_dir)
-    os.makedirs(output_dir)
-    
     try:
-        # Save video from base64
-        video_path = os.path.join(work_dir, filename)
-        video_data = base64.b64decode(video_base64)
-        with open(video_path, "wb") as f:
-            f.write(video_data)
+        # Install ActionMesh if needed
+        install_actionmesh()
         
-        # Extract frames
-        frame_count = extract_frames(video_path, input_dir)
+        job_input = job["input"]
         
-        if frame_count < 16:
-            return {"error": f"Video too short: {frame_count} frames. Need at least 16."}
+        # Get input parameters
+        video_base64 = job_input.get("video_base64")
+        filename = job_input.get("filename", "video.mp4")
+        mode = job_input.get("mode", "fast_low_ram")
         
-        # Run ActionMesh
-        run_actionmesh(input_dir, output_dir, fast=fast, low_ram=low_ram)
+        if not video_base64:
+            return {"error": "No video_base64 provided"}
         
-        # Collect outputs
-        outputs = {
-            "per_frame_meshes": [],
-            "animated_mesh": None,
-            "preview_video": None,
-        }
+        # Determine processing flags
+        fast = mode in ["fast", "fast_low_ram"]
+        low_ram = mode == "fast_low_ram"
         
-        # Upload per-frame meshes
-        for mesh_file in sorted(Path(output_dir).glob("mesh_*.glb")):
-            url = upload_to_storage(str(mesh_file))
-            outputs["per_frame_meshes"].append(url)
+        print(f"Processing video: {filename}, mode: {mode}")
         
-        # Check for animated mesh
-        animated_mesh = Path(output_dir) / "animated_mesh.glb"
-        if animated_mesh.exists():
-            outputs["animated_mesh"] = upload_to_storage(str(animated_mesh))
+        # Create temp directories
+        work_dir = tempfile.mkdtemp(prefix="actionmesh_")
+        input_dir = os.path.join(work_dir, "input")
+        output_dir = os.path.join(work_dir, "output")
+        os.makedirs(input_dir)
+        os.makedirs(output_dir)
         
-        # Check for preview video
-        for video_file in Path(output_dir).glob("*.mp4"):
-            outputs["preview_video"] = upload_to_storage(str(video_file))
-            break
-        
-        return outputs
-        
+        try:
+            # Save video from base64
+            video_path = os.path.join(work_dir, filename)
+            video_data = base64.b64decode(video_base64)
+            with open(video_path, "wb") as f:
+                f.write(video_data)
+            
+            print(f"Saved video: {len(video_data)} bytes")
+            
+            # Extract frames
+            frame_count = extract_frames(video_path, input_dir)
+            print(f"Extracted {frame_count} frames")
+            
+            if frame_count < 16:
+                return {"error": f"Video too short: {frame_count} frames. Need at least 16."}
+            
+            # Run ActionMesh
+            run_actionmesh(input_dir, output_dir, fast=fast, low_ram=low_ram)
+            
+            # Collect outputs
+            outputs = {
+                "per_frame_meshes": [],
+                "animated_mesh": None,
+                "preview_video": None,
+            }
+            
+            # Process per-frame meshes (limit to save bandwidth)
+            mesh_files = sorted(Path(output_dir).glob("mesh_*.glb"))
+            print(f"Found {len(mesh_files)} mesh files")
+            
+            for mesh_file in mesh_files[:5]:  # First 5 meshes as preview
+                outputs["per_frame_meshes"].append(file_to_base64_url(str(mesh_file)))
+            
+            # Check for animated mesh
+            animated_mesh = Path(output_dir) / "animated_mesh.glb"
+            if animated_mesh.exists():
+                outputs["animated_mesh"] = file_to_base64_url(str(animated_mesh))
+            
+            # Check for preview video
+            for video_file in Path(output_dir).glob("*.mp4"):
+                outputs["preview_video"] = file_to_base64_url(str(video_file))
+                break
+            
+            print("Processing complete!")
+            return outputs
+            
+        finally:
+            # Cleanup
+            shutil.rmtree(work_dir, ignore_errors=True)
+            
     except Exception as e:
+        import traceback
+        error_msg = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"Error: {error_msg}")
         return {"error": str(e)}
-    
-    finally:
-        # Cleanup
-        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # Start the serverless handler
